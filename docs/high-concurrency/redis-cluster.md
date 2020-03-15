@@ -117,3 +117,32 @@ redis cluster 的高可用的原理，几乎跟哨兵是类似的。
 
 #### 与哨兵比较
 整个流程跟哨兵相比，非常类似，所以说，redis cluster 功能强大，直接集成了 replication 和 sentinel 的功能。
+
+
+smart jedis
+
+（1）什么是smart jedis
+
+　　基于重定向的客户端，很消耗网络IO，因为大部分情况下，可能都会出现一次请求重定向，才能找到正确的节点
+
+　　所以大部分的客户端，比如java redis客户端，就是jedis，都是smart的
+
+　　本地维护一份hashslot -> node的映射表，缓存，大部分情况下，直接走本地缓存就可以找到hashslot -> node，不需要通过节点进行moved重定向
+
+ 
+
+（2）JedisCluster的工作原理
+
+　　在JedisCluster初始化的时候，就会随机选择一个node，初始化hashslot -> node映射表，同时为每个节点创建一个JedisPool连接池
+
+　　每次基于JedisCluster执行操作，首先JedisCluster都会在本地计算key的hashslot，然后在本地映射表找到对应的节点
+
+　　如果那个node正好还是持有那个hashslot，那么就ok; 如果说进行了reshard这样的操作，可能hashslot已经不在那个node上了，就会返回moved
+
+　　如果JedisCluter API发现对应的节点返回moved，那么利用该节点的元数据，更新本地的hashslot -> node映射表缓存
+
+　　重复上面几个步骤，直到找到对应的节点，如果重试超过5次，那么就报错，JedisClusterMaxRedirectionException
+
+　　jedis老版本，可能会出现在集群某个节点故障还没完成自动切换恢复时，频繁更新hash slot，频繁ping节点检查活跃，导致大量网络IO开销
+
+　　jedis最新版本，对于这些过度的hash slot更新和ping，都进行了优化，避免了类似问题
